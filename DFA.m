@@ -21,10 +21,12 @@ classdef DFA
                 s1 = [];                
                 a = [];
                 s2 = [];
-            elseif(nargin <= 6)
+            end
+            if(nargin <= 6)
                 Q_name = [];
                 U_name = [];
-            elseif(nargin <= 8)
+            end
+            if(nargin <= 8)
                 Q_label = [];
             end
             
@@ -69,13 +71,18 @@ classdef DFA
         end
         
         % get state name
-        function [x_name] = get_s_name(obj,x)
+        function [x_name] = get_x_name(obj,x)
             x_name = obj.Q_name(x);
         end
         
         % get input name
         function [u_name] = get_u_name(obj,u)
             u_name = obj.U_name(u);
+        end
+        
+        % get state label
+        function [x_label] = get_x_label(obj,x)
+            x_label = obj.Q_label(x);
         end
         
         % get state index
@@ -98,7 +105,7 @@ classdef DFA
         function [pre_x, pre_u] = pre(obj,x)
             % input x could be either index or string name
             if isa(x,"string")
-                x = get_s_idx(obj,x);
+                x = get_x_idx(obj,x);
             end
             
             idx = obj.state2==x;
@@ -110,20 +117,20 @@ classdef DFA
         function [pre_x] = pre_xu(obj,x,u)
             % input x could be either index or string name
             if isa(x,"string")
-                x = get_s_idx(obj,x);            
+                x = get_x_idx(obj,x);            
             end
             if isa(u,"string")
                 u = get_u_idx(obj,u);            
             end
             
-            idx = obj.state2==x && obj.action==u;
+            idx = obj.state2==x & obj.action==u;
             pre_x = obj.state1(idx);
         end
         
         % successor of state x
         function [post_x,post_u] = post(obj,x)
             if isa(x,"string")
-                x = get_s_idx(obj,x);
+                x = get_x_idx(obj,x);
             end
             
             idx = obj.state1==x;
@@ -134,22 +141,22 @@ classdef DFA
         % successor of state x
         function post_x = post_xu(obj,x,u)
             if isa(x,"string")
-                x = get_s_idx(obj,x);            
+                x = get_x_idx(obj,x);            
             end
             if isa(u,"string")
                 u = get_u_idx(obj,u);            
             end
             
-            idx = obj.state1==x && obj.action==u;
+            idx = obj.state1==x & obj.action==u;
             post_x = obj.state2(idx);
         end
         
         % controlled predecessors of a set of state X
         function preX = CPre(obj,X)
             if isa(X(1),"string")
-                X = get_s_idx(obj.X);
+                X = get_x_idx(obj.X);
             end
-            preX = zeros(1:obj.n,1,'boolean');
+            preX = zeros(obj.n,1,'logical');
             for i = 1:obj.m
                 idx = sum(obj.A{i}(:,X),2) == sum(obj.A{i},2);
                 preX = preX|idx;
@@ -179,7 +186,7 @@ classdef DFA
             s2 = [];
             
             for i = 1:obj.m
-                [s1_i,s2_i] = ind2sub([obj.n,obj.n],find(obj.A~=0));
+                [s1_i,s2_i] = ind2sub([obj.n,obj.n],find(obj.A{i}~=0));
                 a_i = i*ones(size(s1_i));
                 s1 = [s1;s1_i];
                 a = [a;a_i];
