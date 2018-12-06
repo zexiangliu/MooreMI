@@ -1,8 +1,10 @@
 classdef DFA
     properties (SetAccess = protected)
         Q; % states [1,2,3,4,...]
+        Q0;
         Q_name; % name of states, string array ["ep","ab","abc"]
         Q_label;
+        Q_final; % final states or accepting states
         U; % actions {'a','b','c','d',...}
         U_name;
         n; % number of states
@@ -16,7 +18,7 @@ classdef DFA
     end
     methods(Access = public)
         % constructor
-        function obj = DFA(n,m,A,s1,a,s2,Q_name,U_name,Q_label)
+        function obj = DFA(n,m,A,s1,a,s2,Q_name,U_name,Q0,Q_final,Q_label)
             if(nargin==3)
                 s1 = [];                
                 a = [];
@@ -27,6 +29,12 @@ classdef DFA
                 U_name = [];
             end
             if(nargin <= 8)
+                Q0 = 1;
+            end
+            if(nargin <= 9)
+                Q_final = [];
+            end
+            if(nargin <= 10)
                 Q_label = [];
             end
             
@@ -36,6 +44,18 @@ classdef DFA
             obj.U = 1:m;
             obj.Q_name = Q_name;
             obj.U_name = U_name;
+            if isa(Q0,"string")
+                Q0 = obj.get_x_idx(Q0);
+            end
+            obj.Q0 = Q0;
+            if ~isempty(Q_final)
+                if isa(Q_final(1),'string')
+                    obj.Q_final = get_x_idx(obj,Q_final);
+                else
+                    obj.Q_final = Q_final;
+                end
+            end
+            
             obj.Q_label= Q_label;
             
             if ~isempty(A)
@@ -149,6 +169,42 @@ classdef DFA
             
             idx = obj.state1==x & obj.action==u;
             post_x = obj.state2(idx);
+        end
+        
+        % check if a state is accepting
+        function bool = isaccepting(obj,x)
+            if isa(x,"string")
+                x = get_x_idx(obj,x);
+            end
+            bool = ismember(x,obj.Q_final);
+        end
+        
+        % check if a run is feasible or reaching an accepting state
+        function [status,q] = run(obj,inputs)
+        % output: status = -1 infeasible
+        %                =  0 feasible, not accepting
+        %                =  1 feasible and accepting
+            if isa(inputs,"string")
+                inputs = get_u_idx(inputs);
+            end
+            q = obj.Q0;
+            
+            for i = 1:length(inputs)
+                u = inputs(i);
+                q = find(obj.A{u}(q,:));
+                if(isempty(q))
+                    q = [];
+                    status = -1;
+                    return;
+                end
+                % in case non-deterministic, always pick the first one
+                q = q(1);
+            end
+            if ismember(q,obj.Q_final)
+                status = 1;
+            else
+                status = 0;
+            end
         end
         
         % controlled predecessors of a set of state X
