@@ -26,5 +26,6 @@ post_x = G1.post_xu("a","1")
 
 % test run 
 G1.isaccepting("a")
+G1.isaccepting("b")
 G1.isaccepting("c")
 [status, q] = G1.run([2,2,2])
