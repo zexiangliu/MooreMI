@@ -16,7 +16,11 @@ else
             smaller = a2;
             break;
         else
+            smaller = "und";
         end
+    end
+    if (smaller == "und")
+        smaller = a1;
     end
 end
     
