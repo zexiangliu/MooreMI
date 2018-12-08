@@ -1,4 +1,4 @@
-classdef DFA
+classdef DFA<handle
     properties (SetAccess = protected)
         Q; % states [1,2,3,4,...]
         Q0;
@@ -73,6 +73,12 @@ classdef DFA
             obj.check();
         end
         
+        function G = copy(obj)
+            G = DFA(obj.n,obj.m,obj.A,obj.state1,...
+                obj.action,obj.state2,obj.Q_name,obj.U_name,...
+                obj.Q0,obj.Q_final,obj.Q_label);
+        end
+        
         % santiy check consistency
         function check(obj)
             assert(length(obj.Q) == obj.n);
@@ -91,6 +97,14 @@ classdef DFA
                 length(obj.state2) == length(obj.action));
             assert(length(obj.Q0)==1);
         end
+        % set final states
+        function obj = set_final(obj, Q_final)
+            if isa(Q_final, "string")
+                Q_final = obj.get_x_idx(Q_final);
+            end
+            obj.Q_final(end+1:end+length(Q_final)) = Q_final;
+        end
+        
         % add new states
         function obj = add_x(obj, x_name, x_label, isFinal)
             if ismember(x_name, obj.Q_name)
@@ -99,7 +113,9 @@ classdef DFA
             obj.n = obj.n+1;
             obj.Q(end+1) = obj.n;
             obj.Q_name(end+1) = x_name;
-            obj.Q_label(end+1) = x_label;
+            if ~isempty(obj.Q_label)
+                obj.Q_label(end+1) = x_label;
+            end
             if isFinal
                 obj.Q_final(end+1) = obj.n;
             end
@@ -162,6 +178,16 @@ classdef DFA
         
         % add new transitions
         function obj = add_trans(obj, s1, a, s2)
+            if isa(s1,"string")
+                s1 = obj.get_x_idx(s1);
+            end
+            if isa(s2,"string")
+                s2 = obj.get_x_idx(s2);
+            end
+            if isa(a, "string")
+                a = obj.get_u_idx(a);
+            end
+            
             obj.state1(end+1:end+length(s1)) = s1;
             obj.state2(end+1:end+length(s2)) = s2;
             obj.action(end+1:end+length(a)) = a;
@@ -298,21 +324,24 @@ classdef DFA
         end
         
         % check if a run is feasible or reaching an accepting state
-        function [status,q] = run(obj,inputs)
+        function [status,q,idx_u] = run(obj,inputs)
         % output: status = -1 infeasible
         %                =  0 feasible, not accepting
         %                =  1 feasible and accepting
+        %         q --- the last feasible state, if status = -1
+        %         idx_u --- idx of the first infeasible u if status = -1
             if isa(inputs,"string")
                 inputs = get_u_idx(obj,inputs);
             end
             q = obj.Q0;
-            
+            idx_u = [];
             for i = 1:length(inputs)
                 u = inputs(i);
                 q_hist = q;
                 q = find(obj.A{u}(q,:));
                 if(isempty(q))
                     q = q_hist;
+                    idx_u = i;
                     status = -1;
                     return;
                 end
@@ -343,14 +372,14 @@ classdef DFA
     
     methods(Access = protected)
         function A = sas_to_A(obj)
+            A = cell(obj.m,1);
+            for i = 1:obj.m
+                A{i} = zeros(obj.n,obj.n);
+            end
             s1 = obj.state1;
             a =  obj.action;
             s2 = obj.state2;
-            A = cell(obj.m,1);
             for i = 1:length(s1)
-                if isempty(A{a(i)})
-                    A{a(i)} = zeros(obj.n,obj.n);
-                end
                 A{a(i)}(s1(i),s2(i)) = 1;
             end
         end

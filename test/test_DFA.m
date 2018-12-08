@@ -58,9 +58,10 @@ function testCreateDFA(testCase)
     testCase.verifyFalse(G.isaccepting("3"));
     testCase.verifyTrue(G.isaccepting(2));
     % infeasible string
-    [status, q] = G.run(["a","a","a"]);
+    [status, q, idx_u] = G.run(["a","a","a"]);
     testCase.verifyEqual(status, -1);
     testCase.verifyEqual(q,3);
+    testCase.verifyEqual(idx_u,3);
     % accepting string
     [status, q] = G.run(["a","a","b","b"]);
     testCase.verifyEqual(status, 1);
