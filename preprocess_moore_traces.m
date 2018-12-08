@@ -1,5 +1,18 @@
 function [list_of_pos, list_of_neg, bits_to_output] = preprocess_moore_traces(trace_set)
-    
+% Input: trace_set --- a struct that contains trace.x and trace.y,
+%                      where trace.x = {input 1, ..., input n} and trace.y
+%                      = {output 1, ..., output n}. Both input and output
+%                      need to be represented by array of strings.
+% Output: list_of_pos --- a cell of postive examples. The order is
+%                         [1 x x] --- list_of_pos{1}
+%                         [x 1 x] --- list_of_pos{2}
+%                         [x x 1] --- list_of_pos{3}
+%         list_of_neg --- a cell of negative examples. The order is similar
+%                         to list_of_pos.
+%         bits_to_output --- a mapping between output strings and their
+%                            index. e.g. bits_to_output = ["a","b","c"] 
+%                            <---> indices [0,1,2].
+
     x_list = trace_set.x;
     y_list = trace_set.y;
     
@@ -21,7 +34,7 @@ function [list_of_pos, list_of_neg, bits_to_output] = preprocess_moore_traces(tr
     % put epsilon string into negative example
     for i = 1:N
         list_of_pos{i} = {};
-        list_of_neg{i} = {};eps
+        list_of_neg{i} = {};
         list_of_neg{i}{1} = "eps";
     end
     
@@ -32,7 +45,7 @@ function [list_of_pos, list_of_neg, bits_to_output] = preprocess_moore_traces(tr
         
         % pick up a prefix
         for j = 1:length(x)
-            y_out = find(bits_to_output == y(j+1));
+            y_out = find(bits_to_output == y(j+1))-1;
             
             counter = N;
             while( y_out ~= 0 )

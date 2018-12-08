@@ -70,12 +70,13 @@ classdef DFA
                 obj.state2 = s2;
                 obj.A = sas_to_A(obj);
             end
+            obj.check();
         end
-
+        
         % santiy check consistency
         function check(obj)
-            assert(lenght(obj.Q) == obj.n);
-            assert(lenght(obj.U) == obj.m);
+            assert(length(obj.Q) == obj.n);
+            assert(length(obj.U) == obj.m);
             if ~isempty(obj.Q_name)
                 assert(length(obj.Q)==length(obj.Q_name));
             end
@@ -88,25 +89,137 @@ classdef DFA
             assert(length(obj.U) == length(obj.A));
             assert(length(obj.state1) == length(obj.state2) && ...
                 length(obj.state2) == length(obj.action));
+            assert(length(obj.Q0)==1);
+        end
+        % add new states
+        function obj = add_x(obj, x_name, x_label, isFinal)
+            if ismember(x_name, obj.Q_name)
+                error(x_name + " has existed!");
+            end
+            obj.n = obj.n+1;
+            obj.Q(end+1) = obj.n;
+            obj.Q_name(end+1) = x_name;
+            obj.Q_label(end+1) = x_label;
+            if isFinal
+                obj.Q_final(end+1) = obj.n;
+            end
+            
+            for i = 1:obj.m
+                obj.A{i} = padarray(obj.A{i},[1,1],'post');
+            end
+        end
+        
+        % remove state x
+        function obj = remove_x(obj,x)
+            if isa(x,"string")
+                x = get_x_idx(obj,x);
+            end
+            
+            obj.n = obj.n-1;
+            obj.Q(end) = [];
+            obj.Q_name(x) = [];
+            obj.Q_label(x) = [];
+            idx = obj.Q_final==x;
+            obj.Q_final(idx) = [];
+            % need to re-index the states after x
+            idx = obj.Q_final>x;
+            obj.Q_final(idx) = obj.Q_final(idx)-1;
+            % update the transition matrix
+            for i = 1:obj.m
+                obj.A{i} = obj.A{i}([1:x-1,x+1:end],[1:x-1,x+1:end]);
+            end
+            [s1,a,s2] = A_to_sas(obj);
+            obj.state1 = s1;
+            obj.state2 = s2;
+            obj.action = a;
+        end
+        
+        % add new action
+        function obj = add_u(obj,u_name)
+           obj.m = obj.m+1;
+           obj.U(end+1) = obj.m;
+           obj.U_name(end+1) = u_name;
+        end
+        
+        % remove action u
+        function obj = remove_u(obj, u)
+            if isa( u, "string")
+                u = get_u_idx(obj,u);
+            end
+            
+            obj.m = obj.m-1;
+            obj.U(end) = [];
+            obj.U_name(u) = [];
+            idx = obj.action==u;
+            obj.state1(idx) = [];
+            obj.state2(idx) = [];
+            obj.action(idx) = [];
+            obj.A(u)= [];
+            % need to re-index actions after u
+            idx = obj.action > u;
+            obj.action(idx) = obj.action(idx) - 1;
+        end
+        
+        % add new transitions
+        function obj = add_trans(obj, s1, a, s2)
+            obj.state1(end+1:end+length(s1)) = s1;
+            obj.state2(end+1:end+length(s2)) = s2;
+            obj.action(end+1:end+length(a)) = a;
+            obj.A = sas_to_A(obj);
+        end
+        
+        % remove transitions
+        function obj = remove_trans(obj, s1, a, s2)
+            if isa(s1,"string")
+                s1 = get_x_idx(obj,s1);
+                a = get_u_idx(obj,a);
+                s2 = get_x_idx(obj,s2);
+            end
+            
+            for i = 1:length(s1)
+                obj.A{a(i)}(s1(i),s2(i)) = 0;
+                idx = obj.state1==s1(i) & ...
+                    obj.state2==s2(i) & obj.action==a(i);
+                obj.state1(idx) = [];
+                obj.state2(idx) = [];
+                obj.action(idx) = [];
+            end
         end
         
         % get state name
         function [x_name] = get_x_name(obj,x)
+            if isa(x,"string")
+                x_name = x;
+                return;
+            end
             x_name = obj.Q_name(x);
         end
         
         % get input name
         function [u_name] = get_u_name(obj,u)
+            if isa(u,"string")
+                u_name = u;
+                return;
+            end
             u_name = obj.U_name(u);
         end
         
         % get state label
         function [x_label] = get_x_label(obj,x)
+            if isa(x,"string")
+                x = get_x_idx(x);
+            end
+            
             x_label = obj.Q_label(x);
         end
         
         % get state index
         function [x_idx] = get_x_idx(obj,x)
+            if isa(x,"double")
+                x_idx = x;
+                return;
+            end
+            
             x_idx = zeros(length(x),1);
             for i = 1:length(x_idx)
                 x_idx(i) = find(obj.Q_name == x(i));
@@ -115,6 +228,11 @@ classdef DFA
         
         % get input index
         function [u_idx] = get_u_idx(obj,u)
+            if isa(u,"double")
+                u_idx = u;
+                return;
+            end
+    
             u_idx = zeros(length(u),1);
             for i = 1:length(u_idx)
                 u_idx(i) = find(obj.U_name == u(i));
@@ -185,15 +303,16 @@ classdef DFA
         %                =  0 feasible, not accepting
         %                =  1 feasible and accepting
             if isa(inputs,"string")
-                inputs = get_u_idx(inputs);
+                inputs = get_u_idx(obj,inputs);
             end
             q = obj.Q0;
             
             for i = 1:length(inputs)
                 u = inputs(i);
+                q_hist = q;
                 q = find(obj.A{u}(q,:));
                 if(isempty(q))
-                    q = [];
+                    q = q_hist;
                     status = -1;
                     return;
                 end
