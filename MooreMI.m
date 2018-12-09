@@ -8,7 +8,7 @@ if nargin < 2
     U = bits_to_output;
 end
 
-DFA_list = build_prefix_tree_acceptor_product(list_of_pos,U); 
+DFA_list = build_prefix_tree_acceptor_product(list_of_pos,list_of_neg,U); 
 N = length(DFA_list);
 
 % construct red and blue cell = {["a1","b1",...], ["a2","b2",...],...}
@@ -21,7 +21,7 @@ while(~isempty(blue))
     q_blue = blue(1);
     blue(1) = [];
  
-    merge_accepted = false;  
+    merge_accepted = false;
     
     for i = 1:length(red)
         
@@ -46,7 +46,6 @@ while(~isempty(blue))
             break;
         end
     end
-    
     
     if merge_accepted
         DFA_list = new_DFA_list; 
@@ -83,7 +82,7 @@ function bool = is_consistent(DFA,set_of_neg)
         return;
     end
     % start from 2 because 1st is eps by default
-    for i = 2:length(set_of_neg)
+    for i = 1:length(set_of_neg)
         neg_example = set_of_neg{i};
         status = DFA.run(neg_example);
         % supposed to be feasible and non-accepting

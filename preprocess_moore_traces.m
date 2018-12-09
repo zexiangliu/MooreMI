@@ -35,7 +35,6 @@ function [list_of_pos, list_of_neg, bits_to_output] = preprocess_moore_traces(tr
     for i = 1:N
         list_of_pos{i} = {};
         list_of_neg{i} = {};
-        list_of_neg{i}{1} = "eps";
     end
     
     % pick up a trace
