@@ -22,9 +22,9 @@ function [list_of_pos, list_of_neg, bits_to_output] = preprocess_moore_traces(tr
         output_total = [output_total,y_list{i}];        
     end
     output_total = unique(output_total);
-    % by default "0" is from epsilon string,
-    % which is the first element of bits_to_output
-    bits_to_output = sort(output_total);
+    % make sure that the first element is the output of initial state
+    bits_to_output = output_total;
+    bits_to_output(2:end) = sort(output_total(2:end));
     
     N = ceil(log2(length(output_total)));
     
@@ -48,7 +48,7 @@ function [list_of_pos, list_of_neg, bits_to_output] = preprocess_moore_traces(tr
             y_out = find(bits_to_output == y(j+1))-1;
             
             counter = N;
-            while( y_out ~= 0 )
+            while( counter ~= 0 )
                 if(mod(y_out,2))
                     list_of_pos{counter}{end+1} = x(1:j);
                 else

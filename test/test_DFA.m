@@ -71,3 +71,62 @@ function testCreateDFA(testCase)
     testCase.verifyEqual(status, 0);
     testCase.verifyEqual(q,3);
 end
+
+function testAddRemove(testCase)
+    n = 3;
+    m = 2;
+
+    A1 = [0 1 0; 0 0 1;0 0 0];
+    A2 = [0 0 0; 1 0 0;0 1 0];
+
+    A = {A1,A2};
+    Q_name = ["1","2","3"];
+    Q_final = ["1","2"];
+    Q_label = ["01","02","03"];
+    U_name = ["a","b"];
+    Q0 = "1";
+    G = DFA(n,m,A,[],[],[],Q_name,U_name,Q0,Q_final,Q_label);
+    
+    % test add x
+    G.add_x("4","04",true);
+    G.add_trans(3,"a",4);
+    G.add_trans(4,"b",3);
+    [status, q] = G.run(["a","b","a","a","a"]);
+    testCase.verifyEqual(status,1);
+    testCase.verifyEqual(q,4);
+
+    % test remove x
+    G.remove_x("4");
+    [status, q] = G.run(["a","b","a","a","a"]);
+    testCase.verifyEqual(status,-1);
+    testCase.verifyEqual(q,3);
+    
+    % test remove u
+    G.remove_u("a");
+    testCase.verifyEqual(length(G.A),1);
+end
+
+function testMerge(testCase)
+    n = 7;
+    m = 2;
+    Q_name = ["eps0","a","b","aa","ba","bb","bab"];
+    Q_final = "b";
+    Q_label = [];
+    U_name = ["a","b"];
+    Q0 = "eps0";
+    s1 = [1,1,2,3,3,5];
+    a  = ["a","b","a","a","b","b"];
+    s2 = [2,3,4,5,6,7];
+    G = DFA(n,m,[],s1,a,s2,Q_name,U_name,Q0,Q_final,Q_label);
+    
+    % test merge 
+    G.merge("a","b");
+    testCase.verifyEqual(G.n,5);
+    testCase.verifyTrue(G.A{1}(1,2)==1);
+    testCase.verifyTrue(G.A{1}(1,3)==0);
+    testCase.verifyTrue(G.A{1}(2,3)==1);
+    testCase.verifyTrue(G.A{2}(1,2)==1);
+    testCase.verifyTrue(G.A{2}(2,4)==1);
+    testCase.verifyTrue(G.A{2}(3,5)==1);
+    testCase.verifyTrue(length(G.state1)==5)
+end

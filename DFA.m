@@ -60,14 +60,24 @@ classdef DFA<handle
             
             if ~isempty(A)
                 obj.A = A;
-                [s1,a,s2] = A_to_sas(obj);
-                obj.state1 = s1;
-                obj.action = a;
-                obj.state2 = s2;
+                obj.update_sas();
             elseif ~isempty(s1)
-                obj.state1 = s1;
-                obj.action = a;
-                obj.state2 = s2;
+                if isa(s1,"string")
+                    s1 = get_x_idx(obj,s1);
+                end
+                if isa(s2,"string")
+                    s2 = get_x_idx(obj,s2);
+                end
+                if isa(a,"string")
+                    a = get_u_idx(obj,a);
+                end
+                len_s1 = length(s1);
+                obj.state1 = zeros(len_s1,1);
+                obj.action = zeros(len_s1,1);
+                obj.state2 = zeros(len_s1,1);
+                obj.state1(1:end) = s1;
+                obj.action(1:end) = a;
+                obj.state2(1:end) = s2;
                 obj.A = sas_to_A(obj);
             end
             obj.check();
@@ -97,12 +107,28 @@ classdef DFA<handle
                 length(obj.state2) == length(obj.action));
             assert(length(obj.Q0)==1);
         end
+        % add final states
+        function obj = add_final(obj, Q_final)
+            if isa(Q_final, "string")
+                Q_final = obj.get_x_idx(Q_final);
+            end
+            obj.Q_final(end+1:end+length(Q_final)) = Q_final;
+        end
+        
         % set final states
         function obj = set_final(obj, Q_final)
             if isa(Q_final, "string")
                 Q_final = obj.get_x_idx(Q_final);
             end
-            obj.Q_final(end+1:end+length(Q_final)) = Q_final;
+            obj.Q_final = Q_final;
+        end
+        
+        % set state label
+        function obj = set_label(obj, Q_label)
+            if length(Q_label) ~= obj.n
+                error("The number of Q_label and states mismatch.");
+            end
+            obj.Q_label = Q_label;
         end
         
         % add new states
@@ -134,7 +160,9 @@ classdef DFA<handle
             obj.n = obj.n-1;
             obj.Q(end) = [];
             obj.Q_name(x) = [];
-            obj.Q_label(x) = [];
+            if ~isempty(obj.Q_label)
+                obj.Q_label(x) = [];
+            end
             idx = obj.Q_final==x;
             obj.Q_final(idx) = [];
             % need to re-index the states after x
@@ -144,10 +172,7 @@ classdef DFA<handle
             for i = 1:obj.m
                 obj.A{i} = obj.A{i}([1:x-1,x+1:end],[1:x-1,x+1:end]);
             end
-            [s1,a,s2] = A_to_sas(obj);
-            obj.state1 = s1;
-            obj.state2 = s2;
-            obj.action = a;
+            obj.update_sas();
         end
         
         % add new action
@@ -198,8 +223,12 @@ classdef DFA<handle
         function obj = remove_trans(obj, s1, a, s2)
             if isa(s1,"string")
                 s1 = get_x_idx(obj,s1);
-                a = get_u_idx(obj,a);
+            end
+            if isa(s2,"string")
                 s2 = get_x_idx(obj,s2);
+            end
+            if isa(a,"string")
+                a = get_u_idx(obj,a);
             end
             
             for i = 1:length(s1)
@@ -296,10 +325,13 @@ classdef DFA<handle
             if isa(x,"string")
                 x = get_x_idx(obj,x);
             end
-            
-            idx = obj.state1==x;
-            post_x = obj.state2(idx);
-            post_u = obj.action(idx);
+            post_x = [];
+            post_u = [];
+            for i =1:length(x)
+                idx = obj.state1==x(i);
+                post_x = [post_x;obj.state2(idx)];
+                post_u = [post_u;obj.action(idx)];
+            end
         end
         
         % successor of state x
@@ -367,6 +399,82 @@ classdef DFA<handle
             end
             preX = find(idx);
         end
+        
+        function obj = merge(obj,s1,s2)
+            if isa(s1,"string")
+                s1 = get_x_idx(obj,s1);
+            end
+            if isa(s2,"string")
+                s2 = get_x_idx(obj,s2);
+            end
+            
+            [q_u,a_u] = obj.pre(s2);
+            if length(q_u)~=1
+                error("The parents of s2 are not unique!");
+            end
+            
+            obj.A{a_u}(q_u,s2) = 0;
+            obj.A{a_u}(q_u,s1) = 1;
+            
+            merge_stack_s1 = s1;
+            merge_stack_s2 = s2;
+            
+            while(~isempty(merge_stack_s1))
+                q1 = merge_stack_s1(end);
+                q2 = merge_stack_s2(end);
+                merge_stack_s1(end) = [];
+                merge_stack_s2(end) = [];
+                
+                if q1==q2
+                    continue;
+                end
+                if q1~=s1 && q2~=s2 && obj.isLess(q2,q1)
+                    tmp_q1 = q1;
+                    q1 = q2;
+                    q2 = tmp_q1;
+                end
+                if ismember(q2,obj.Q_final) && ~ismember(q1,obj.Q_final)
+                    obj.Q_final(end+1) = q1;
+                end
+                
+                for u = 1:obj.m
+                    q1_new = find(obj.A{u}(q1,:));
+                    q2_new = find(obj.A{u}(q2,:));
+                    
+                    if ~isempty(q2_new)
+                        if  ~isempty(q1_new)
+                            merge_stack_s1(end+1) = q1_new;
+                            merge_stack_s2(end+1) = q2_new;
+                        else
+                            obj.A{u}(q1,:) = obj.A{u}(q2,:);
+                        end
+                    end
+                end
+                % remove q2 and obj.s1, a, s2 are updated in remove_x
+                obj.remove_x(q2); 
+                % update indices in merge_stack
+                idx = merge_stack_s1>q2;
+                merge_stack_s1(idx) = merge_stack_s1(idx)-1;
+                idx = merge_stack_s2>q2;
+                merge_stack_s2(idx) = merge_stack_s2(idx)-1;
+                % update s1 and s2
+                if s1>q2
+                    s1 = s1-1;
+                end
+                if s2>q2
+                    s2 = s2-1;
+                end
+            end
+        end
+
+        function obj = complete(obj)
+            for i = 1:obj.m
+                sub = find(sum(obj.A{i},2)==0);
+                idx = sub2ind([obj.n,obj.n],sub,sub);
+                obj.A{i}(idx) = 1;
+            end
+            obj.update_sas();
+        end
     end
     
     
@@ -374,7 +482,7 @@ classdef DFA<handle
         function A = sas_to_A(obj)
             A = cell(obj.m,1);
             for i = 1:obj.m
-                A{i} = zeros(obj.n,obj.n);
+                A{i} = zeros(obj.n,obj.n,'logical');
             end
             s1 = obj.state1;
             a =  obj.action;
@@ -397,5 +505,35 @@ classdef DFA<handle
                 s2 = [s2;s2_i];
             end
         end
+        
+        function obj = update_sas(obj)
+            [s1,a,s2] = obj.A_to_sas();
+            obj.state1 = s1;
+            obj.state2 = s2;
+            obj.action = a;
+        end
+        
+        % decide whether q1<q2
+        function bool = isLess(obj,q1,q2)
+            
+            bool = false;
+            
+            if isa(q1,"double")
+                q1 = obj.get_x_name(q1);
+            end
+            if isa(q2,"double")
+                q2 = obj.get_x_name(q2);
+            end
+            eps0 = obj.get_x_name(obj.Q0);
+            if q2 == eps0
+                return;
+            end
+            
+            if q1 == eps0 || strlength(q1) < strlength(q2) ||...
+                    strlength(q2)==strlength(q1) && q1<q2
+                bool = true;
+            end
+        end
+
     end
 end

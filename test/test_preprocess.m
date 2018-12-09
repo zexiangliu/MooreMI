@@ -12,5 +12,7 @@ function testPreprocess(testCase)
     testCase.verifyEqual(size(list_of_pos),[2,1]);
     testCase.verifyEqual(list_of_pos{1}{1},["a","b","d"])
     testCase.verifyEqual(list_of_neg{1}{1},"eps");
+    testCase.verifyEqual(list_of_neg{1}{2},"a");
     testCase.verifyEqual(bits_to_output,["0","1","2"]);
+    
 end
