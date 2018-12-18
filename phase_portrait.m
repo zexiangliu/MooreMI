@@ -22,10 +22,10 @@ for i = 1:numel(x)
     u(i) = Yprime(1);
     v(i) = Yprime(2);
     l = norm([u(i);v(i)],2);
-    u(i) = u(i)/l;
-    v(i) = v(i)/l;
+    u(i) = u(i);
+    v(i) = v(i);
 end
-quiver(x,y,u,v,'k'); figure(gcf)
+quiver(x,y,u,v,'color',rand(1,3)); figure(gcf)
 % xlabel('y_1')
 % ylabel('y_2')
 xticks([-1 -0.5 0.5 1])
