@@ -9,12 +9,16 @@ classdef Abstraction < handle
         A; % adjacent matrix of the grids
         spec; % the verification/synthesis specification
         label; % labeling of grids
-        ts; % transition system corresponding to the partitions
-        Win; % winning set
         dyn; % function handle, dynamics of the system, take state ...
              % and action as inputs
         K; % Lipschitz constant, a function of state and action
         mini_width; % the minimal width of grid
+        
+        ts; % transition system corresponding to the partitions
+        Win; % winning set
+        CWin; % candidate winning set
+        cont; % controller
+        ts_enabled; % if ts is computed
     end
     
     methods
@@ -26,7 +30,7 @@ classdef Abstraction < handle
             obj.U = U;
             obj.G = G;
             obj.dim = size(G{1},1);
-            obj.n = length(G);
+            obj.n = length(G); 
             obj.m = length(U);
             obj.spec = spec;
             obj.label = label;
@@ -36,20 +40,37 @@ classdef Abstraction < handle
             obj.ts = [];
             obj.Win = [];
             obj.mini_width = mini_width;
+            obj.ts_enabled = false;
         end
         
-        function obj = verifyTransition(obj, mini_width)
-            if nargin == 1
+        % verify the transitions in A
+        function obj = verifyTransition(obj, mini_width, G2_idx)
+            % input: G2_idx --- optional, you can select some idx to update
+            %                   partially.
+           
+            if nargin == 1 || isempty(mini_width)
                 mini_width = obj.mini_width;
+            end
+            if nargin <= 2
+                flag_part = false;
+                G2_idx = [];
+            else
+                flag_part = true;
+                G2_idx = sort(G2_idx);
             end
             for idx_u = 1:obj.m
                 for G1 = 1:obj.n
-                    for G2 = 1:G1-1
+                    if flag_part % if verify part of the states
+                        list_G2 = setdiff(G2_idx,G1);
+                    else
+                        list_G2 = 1:G1-1;
+                    end
+                    for G2 = list_G2
                         % verify if there is any transition between i and j
                         if obj.A{idx_u}(G1,G2) == 1 || obj.A{idx_u}(G2,G1) == 1
                             [~, ~, cmn_surface] = has_cmn_surface(...
                                                             obj, G1, G2);
-                            direct = is_transit(obj, G1, G2, ...
+                            direct = has_transition(obj, G1, G2, ...
                                 cmn_surface,idx_u,mini_width);
 
                             switch direct
@@ -68,13 +89,143 @@ classdef Abstraction < handle
                             end
                         end
                     end
+                    
+                    if ~flag_part || flag_part && ismember(G1,G2_idx)
+                        if obj.A{idx_u}(G1,end) == 1 || obj.A{idx_u}(end,G1)
+                            direct = obj.is_bnd_inv(G1,idx_u,mini_width);
+                            switch direct
+                                case 0 % both
+                                    obj.A{idx_u}(G1,end) = 1;
+                                    obj.A{idx_u}(end,G1) = 1;
+                                case 1 % in
+                                    obj.A{idx_u}(G1,end) = 0;
+                                    obj.A{idx_u}(end,G1) = 1;
+                                case 2 % out
+                                    obj.A{idx_u}(G1,end) = 1;
+                                    obj.A{idx_u}(end,G1) = 0;
+                                otherwise
+                                    error("direct is not correct!");
+                            end
+                        end
+                        
+                        if obj.A{idx_u}(G1,G1) == 1 && ...
+                                obj.is_transit(G1,idx_u)
+                            obj.A{idx_u}(G1,G1) = 0;
+                        end
+                    end
                 end
+            end
+        end
+        % verify the self loop of a state
+        function bool = is_transit(obj,G1,idx_u,mini_width)
+            if nargin <=3
+                mini_width = obj.mini_width;
+            end
+            
+            PG1 = obj.G{G1};
+            u = obj.U(idx_u);
+            x = mean(PG1,2);
+            flag_transit = sign(obj.dyn(x,u));
+            [~, cover] = obj.compute_cover(x,u,flag_transit,1);
+            residual = obj.surface_diff(PG1,cover);
+            
+            queue = residual;
+            
+            bool = false;
+            while ~isempty(queue)
+                % queue pop
+                grid = queue{1};
+                
+                queue(1) = [];
+                % compute the cover and decide flow direction
+                x = mean(grid,2);
+                [flow, cover] = obj.compute_cover(x,u,flag_transit,1);
+                
+                % if the grid is too small or cover is too small, stop
+                if max(grid(:,2)-grid(:,1)) <= mini_width...
+                         && any(grid(:,1) < cover(:,1) & ...
+                        grid(:,2) > cover(:,2)) 
+                    flow(flag_transit==0) = inf;
+                    flow(flow == 0) = inf;
+                    % discard the dimension that has minimal flow
+                    [~,discard_idx] = min(abs(flow));
+                    flag_transit(discard_idx) = 0;
+                    queue{end+1} = grid; % re-push the grid into the queue
+                    continue;
+                end
+                
+                idx = sign(flow) ~= flag_transit;
+                flag_transit(idx) = 0;
+                residual = obj.surface_diff(grid,cover);
+                % queue push
+                queue(end+1:end+length(residual)) = residual;
+                
+                if all(flag_transit == 0) || all(flow == 0)
+                    return;
+                end
+            end 
+            bool = true;
+        end
+        
+        % verify if the grid on the boundary of the state space is inv,
+        % means that the flow points into the grid/state space
+        function direct = is_bnd_inv(obj, ...
+                G1, idx_u, mini_width)
+            % output: direct --- =0 indeterminate
+            %                    =1 in
+            %                    =2 out
+            if nargin == 3
+                mini_width = obj.mini_width;
+            end
+            PG = obj.G{G1};
+            idx_lb = find(PG(:,1)==obj.X(:,1));
+            idx_ub = find(PG(:,2)==obj.X(:,2));
+            u = obj.U(idx_u);
+            direct = []; % collect directions of common surfaces on bnd.
+            % lower or left bnd case
+            for i = 1:length(idx_lb)
+                idx = idx_lb(i);
+                normal = zeros(obj.dim,1);
+                normal(idx) = 1;
+                cmn_surface = PG;
+                cmn_surface(idx,2) = cmn_surface(idx,1);
+                direct(end+1) =  verify_surface(...
+                obj, u, cmn_surface,normal,mini_width);
+                if direct(end) == 0 || ...
+                        ismember(1,direct) && ismember(2,direct)
+                    direct = 0;
+                    return;
+                end
+            end
+            
+            % upper or right bnd case
+            for i = 1:length(idx_ub)
+                idx = idx_ub(i);
+                normal = zeros(obj.dim,1);
+                normal(idx) = -1;
+                cmn_surface = PG;
+                cmn_surface(idx,1) = cmn_surface(idx,2);
+                direct(end+1) =  verify_surface(...
+                    obj, u, cmn_surface,normal,mini_width);
+                if direct(end) == 0 || ...
+                        ismember(1,direct) && ismember(2,direct)
+                    direct = 0;
+                    return;
+                end
+            end 
+            
+            if all(direct == 1)
+                direct = 1;
+            elseif all(direct == 2)
+                direct = 2;
+            else
+                direct = 0;
             end
         end
         
         % verify the direction of the flow on the common surface.
-        function [direct, list_cover, cover_direct] =...
-                is_transit(obj, G1, G2, cmn_surface, idx_u, mini_width)
+        function direct =...
+                has_transition(obj, G1, G2, cmn_surface, idx_u, mini_width)
         % input: cmn_surface --- output from has_cmn_surface(obj,G1,G2)
         %        u --- action
         % output: direct --- 0: indeterminate or i <---> j
@@ -87,17 +238,25 @@ classdef Abstraction < handle
             if nargin == 5
                 mini_width = obj.mini_width;
             end
-            
-            list_cover = {};
-            cover_direct = {};
-            flag_cover = nargout > 1;
             u = obj.U(idx_u);
             % compute the normal vector of the common surface from i to j
             normal = double(cmn_surface(:,2)==cmn_surface(:,1));
             center_G1 = mean(obj.G{G1},2);
             center_G2 = mean(obj.G{G2},2);
             normal = sign(center_G2-center_G1).*normal;
-            
+            direct =  verify_surface(obj, u, cmn_surface,...
+                    normal,mini_width);
+        end
+        
+        % helper function of has_transition
+        function [direct, list_cover, cover_direct] =  verify_surface(...
+                obj, u, cmn_surface, normal, mini_width)
+        % output: direct --- = 0 indeterminate
+        %                    = 1 along the normal
+        %                    = 2 along the negative normal
+            flag_cover = nargout > 1;
+            list_cover = {};
+            cover_direct = {};
             queue = {cmn_surface};
             flag_12 = false;
             flag_21 = false;
@@ -153,7 +312,7 @@ classdef Abstraction < handle
                 if ~flag_cover && flag_12 && flag_21
                     break;
                 end
-            end
+            end 
             
             if flag_12 && flag_21
                 direct = 0;
@@ -167,12 +326,29 @@ classdef Abstraction < handle
         end
         
         % compute the radius of the cover
-        function [flow, cover] = compute_cover(obj,x,u,normal)
+        function [flow, cover] = compute_cover(obj,x,u,normal, mode)
         % inputs: x --- state you want to query
         %         u --- action applied
         %         normal --- normal vector of the common surface
+        %         mode --- = 0 find cover for surface
+        %                  = 1 find cover for grid
+            if nargin <= 4
+                mode = 0;
+            end
             flow = obj.dyn(x,u);
-            r = min(abs(flow(normal~=0)))/obj.K(x,u);
+            if mode == 0
+                r = min(abs(flow(normal~=0)))/obj.K(x,u);
+            elseif mode == 1
+                normal(flow == 0) = 0;
+                if all(normal==0)
+                    r=0;
+                else
+                    % here we make the r a little bit smaller such that the
+                    % flow has strictly positive component by dividing
+                    % (1+1e-6).
+                    r = min(abs(flow(normal~=0)))/obj.K(x,u)/(1+1e-6);
+                end
+            end
             cover = [x-ones(obj.dim,1)*r,x+ones(obj.dim,1)*r];
         end
         
@@ -244,6 +420,12 @@ classdef Abstraction < handle
         %                  common surface.
         %         cmn_surface --- the common surface represented by dimx2
         %                         matrix
+            if G1 == G2
+                bool = true;
+                cmn_dim = 0;
+                cmn_surface =[];
+                return;
+            end
             PG1 = obj.G{G1};
             PG2 = obj.G{G2};
             bool = false;
@@ -306,15 +488,151 @@ classdef Abstraction < handle
             end
         end
         
-        function ts = to_TransSyst(obj)
+        % convert the abstraction to TransSyst format
+        function obj = to_TransSyst(obj)
+            n_s = obj.n+1;
+            n_a = obj.m;
             
+            s1 = [];
+            s2 = [];
+            a = [];
+            for idx_u = 1:obj.m
+                for i = 1:obj.n+1
+                    for j = 1:obj.n+1
+                        if obj.A{idx_u}(i,j)
+                            s1(end+1) = i;
+                            s2(end+1) = j;
+                            a(end+1) = idx_u;
+                        end
+                    end
+                end
+            end
+            obj.ts = TransSyst(n_s, n_a);
+            obj.ts.add_transition(s1,s2,a);
+            obj.ts.trans_array_enable();
+            obj.ts_enabled = true;
         end
-        plot(obj);
+        
+        % set spec property
+        function obj = set_spec(obj, A, B, C_list, quant1, quant2)
+        % spec supported is []A & <>[]B & (AND_i []<>C_i)
+        % inputs: A --- a subset of 1:n
+        %         B --- a subset of 1:n
+        %         C_list --- a cell of subsets of 1:n
+            obj.spec.A = A;
+            obj.spec.B = B;
+            obj.spec.C = C_list;
+            if nargin == 4
+                obj.spec.quant1 = 'exists';
+                obj.spec.quant2 = 'forall';
+            else
+                obj.spec.quant1 = quant1;
+                obj.spec.quant2 = quant2;
+            end
+        end
+        
+        % given labeling, return the states with that label.
+        function states = label_inverse(obj, label)
+            states = [];
+            for i = 1:obj.n
+                if ismember(label, obj.label{i})
+                    states(end+1) = i;
+                end
+            end
+        end
+        
+        % synthsis
+        function [V, Cv, control, obj] = win_primal(obj, A, B, C_list, ...
+                quant1, quant2, V)
+            if obj.ts_enabled == false
+                obj.to_TransSyst();
+            end
+            if nargin == 1
+                A = obj.spec.A;
+                B = obj.spec.B;
+                C_list = obj.spec.C;
+            end
+            if nargin <= 4
+                try
+                    quant1 = obj.spec.quant1;
+                    quant2 = obj.spec.quant2;
+                catch
+                    quant1 = 'exists';
+                    quant2 = 'forall';
+                end
+            end
+            if nargin <= 6
+                V = [];
+            end
+            [V, Cv, control] = obj.ts.win_primal(...
+                                A, B, C_list, quant1, quant2, V);
+            Cv = setdiff(Cv,obj.n+1); % remove dummy state
+            obj.Win = V;
+            obj.CWin = Cv;
+            obj.cont = control;
+        end
+        
+        % refine grid G1 according to the covers on the boundary
+        function obj = refinement(obj, G1)
+            % disable synthesis
+            obj.ts_enabled = false;
+            new_grids = obj.grid_refine_naive(G1);
+            num_new = length(new_grids);
+            new_idx = [G1,obj.n+1:obj.n+3];
+            % update partition
+            obj.G{G1} = new_grids{1};
+            obj.G(end+1:end+num_new-1)=new_grids(2:end);
+            % update labeling
+            obj.label(end+1:end+num_new-1) = obj.label(G1);
+            % update n
+            obj.n = length(obj.G);
+            % update A
+            obj.update_A(new_idx);
+            
+            % verify new A
+            obj.verifyTransition([],new_idx);
+        end
+        
+        % naive refinement strategy
+        function new_grids = grid_refine_naive(obj,grid)
+            PG = obj.G{grid};
+            new_grids = cell(2^obj.dim,1);
+            
+            % divide each dimension into two intervals
+            list_intervals = cell(obj.dim,2);
+            DIM = cell(obj.dim,1);
+            for i = 1:obj.dim
+                cnt_pt = mean(PG(i,:));
+                list_intervals{i}{1} = [PG(i,1) cnt_pt];
+                list_intervals{i}{2} = [cnt_pt PG(i,2)];
+                DIM{i} = 1:2;
+            end
+            % take the combinations as new grids
+            SUB = ndgrid2(DIM);
+            for i = 1:length(SUB{1})
+                new_grid = zeros(obj.dim,2);
+                for j = 1:obj.dim
+                    idx_int = SUB{j}(i);
+                    new_grid(j,:) = list_intervals{j}{idx_int};
+                end
+                new_grids{i} = new_grid;
+            end
+        end
+        
+        % check if a grid is on the boundary.
+        function bool = is_boundary(obj,s)
+            PG = obj.G{s};
+            bool = false;
+            if any(PG(:,1)==obj.X(:,1)) || any(PG(:,2)==obj.X(:,2))
+                bool = true;
+            end
+        end
     end
     methods(Access = protected)
         function initialize_A(obj)
             obj.A = cell(obj.m,1);
-            Adj = eye(obj.n);
+            Adj = eye(obj.n+1,'logical');% we implicitly add one dummy state in A to
+                                 %  indicate the region beyond X
             for i = 1:obj.n
                 for j = 1:i-1
                     if has_cmn_surface(obj,i,j)
@@ -322,9 +640,59 @@ classdef Abstraction < handle
                         Adj(j,i) = 1;
                     end
                 end
+                if is_boundary(obj,i)
+                    Adj(i,end) = 1;
+                    Adj(end,i) = 1;
+                end
             end
+            
             for i = 1:obj.m
                 obj.A{i} = Adj;
+            end
+        end
+        
+            
+        function obj = update_A(obj, new_idx)
+            A_pad = zeros(obj.n+1,'logical');
+            for G1 = new_idx
+                for G2 = 1:obj.n
+                    if obj.has_cmn_surface(G1,G2)
+                        A_pad(G1,G2) = 1;
+                        A_pad(G2,G1) = 1;
+                    end
+                end
+                if is_boundary(obj,G1)
+                    A_pad(G1,end) = 1;
+                    A_pad(end,G1) = 1;
+                end
+            end
+            
+            siz_A = size(obj.A{1},1);
+            for i = 1:obj.m
+                A_i = obj.A{i};
+                obj.A{i} = zeros(obj.n+1,'logical');
+                % copy main part of old A
+                obj.A{i}(1:siz_A-1,1:siz_A-1)= A_i(1:end-1,1:end-1);
+                % reset G1
+                obj.A{i}(new_idx(1),:) = 0;
+                obj.A{i}(:,new_idx(1)) = 0;
+                % copy old dummy transitions
+                obj.A{i}(end,1:siz_A-1) = A_i(end,1:siz_A-1);
+                obj.A{i}(1:siz_A-1,end) = A_i(1:siz_A-1,end);
+                % reset dummy transition of G1
+                obj.A{i}(end,new_idx(1)) = 0;
+                obj.A{i}(new_idx(1),end) = 0;
+                % add self-loop to dummy state
+                obj.A{i}(end,end) = 1;
+                % add A_pad to obj.A{i}
+                obj.A{i} = obj.A{i} | A_pad;
+                % self loop of new states: if original grid has no self
+                % loop, then the new states have no self loop
+                if A_i(new_idx(1),new_idx(1))==0
+                    for j = 1:length(new_idx)
+                        obj.A{i}(new_idx(j),new_idx(j)) = 0;
+                    end
+                end
             end
         end
     end
