@@ -8,7 +8,7 @@ param.g = 10;
 
 X = [0, 100
      -50, 50];
-F = linspace(-3700,3600,4);
+F = linspace(-3700,3700,4);
 v_y = linspace(-5,5,10);
 
 U = {};
@@ -36,6 +36,8 @@ spec.C = {};
 
 abs_model = Abstraction(X, U, G, spec, label, @(x,u) dyn(x,u,param)...
     , @(x,u,r) Lipschitz(x,u,r,param),1e-5);
+
+%%
 fig = figure(1);
 abs_model.phase_portrait(fig, 20);
 
@@ -51,15 +53,15 @@ abs_model.plot(fig3,0,'k');
 %% start refinement
 
 W_old = W;
-mapg = {};
-
-u1 = sub2ind([10,4],10,4);
-u2 = sub2ind([10,4],1,4);
-mapg{1} = {1,2,[u1,u2]};
-
-u1 = sub2ind([10,4],10,1);
-u2 = sub2ind([10,4],1,1);
-mapg{2} = {1,1,[u1,u2]};
+% mapg = {};
+% 
+% u1 = sub2ind([10,4],10,4);
+% u2 = sub2ind([10,4],1,4);
+% mapg{1} = {1,2,[u1,u2]};
+% 
+% u1 = sub2ind([10,4],10,1);
+% u2 = sub2ind([10,4],1,1);
+% mapg{2} = {1,1,[u1,u2]};
 
 counter = 0;
 while(~isempty(CW) || isempty(W))
@@ -73,8 +75,9 @@ while(~isempty(CW) || isempty(W))
     [~,idx] = max(grid_vol);
     abs_model.refinement(CW(idx(1)));
     W_old = W;
-    abs_model.to_TransSyst(true,mapg);
-    [W,CW,~] = abs_model.win_primal();
+%     abs_model.to_TransSyst(true,mapg);
+    abs_model.to_TransSyst();
+    [W,CW,cont] = abs_model.win_primal();
     
     abs_model.plot(fig2,CW,'r');
     if ~isempty(W)
@@ -86,7 +89,7 @@ while(~isempty(CW) || isempty(W))
     CW
     counter = counter + 1;
     disp("Iteration "+num2str(counter));
-    if counter > 5
+    if counter > 20
         break;
     end
 end

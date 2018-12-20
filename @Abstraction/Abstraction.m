@@ -745,7 +745,28 @@ classdef Abstraction < handle
                 'EdgeColor',color,'FaceColor','none','LineWidth',2);
             end
         end
+        
+% plot the partition of the abstraction
+        function plot_box(obj,fig,grid,color)
+        % input: fig --- figure handle
+        %        list_grid --- you can specify some grids to plot
+            if nargin <= 1
+                figure;
+            else
+                figure(fig);
+            end
+            hold on;
+            v = [grid(1,1) grid(2,1);
+                 grid(1,1) grid(2,2);
+                 grid(1,2) grid(2,2);
+                 grid(1,2) grid(2,1)];
+            f = [1 2 3 4];
+            patch('Faces',f,'Vertices',v,...
+            'EdgeColor',color,'FaceColor','none','LineWidth',2);
+        end
     end
+    
+    
     methods(Access = protected)
         function initialize_A(obj)
             obj.A = cell(obj.m,1);
