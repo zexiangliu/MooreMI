@@ -7,7 +7,7 @@ function testAbsContruct(testCase)
     B = [1;1];
     dyn1 = @(x,u) A*x + B*u;
 
-    K1 = @(x,u) norm(A,'inf');
+    K1 = @(x,u,r) norm(A,'inf');
     
     % state space [-1,1]x[-1,1], the initial partition has four grids
     X = [-1 1; -1 1];
@@ -78,7 +78,7 @@ function testVerifyTransition(testCase)
     G2 = {P1, P2 ,P3, P4, P5, P6};
     label = {"a","b","c","d","e","f"};
     dyn = @(x,u) [1;1];
-    abs_test = Abstraction(X, U, G2, spec, label, dyn, @(x,u) 20, 0.1);
+    abs_test = Abstraction(X, U, G2, spec, label, dyn, @(x,u,r) 20, 0.1);
     
     % labeling inverse function
     testCase.verifyEqual(abs_test.label_inverse("f"),6);
@@ -129,7 +129,7 @@ function testVerifyTransition(testCase)
     x = [0.5;0];
     normal = [1;0];
     u = 1;
-    [flow, cover] = abs_test.compute_cover(x,u,normal);
+    [flow, cover] = abs_test.compute_cover(x,u,normal,0,surface);
     testCase.verifyTrue(length(flow)==2);
     testCase.verifyTrue(all(cover(:,1)<=cover(:,2)));
     abs_test.verifyTransition(0.001);
@@ -143,9 +143,15 @@ function testVerifyTransition(testCase)
     A_ref = logical(A_ref);
     testCase.verifyEqual(abs_test.A{1},A_ref);
     
+    % verify the transit_cerf
+    testCase.verifyEqual(abs_test.transit_cerf{1}{1}{2},1:6);
+    testCase.verifyEqual(abs_test.transit_cerf{1}{1}{1},[]);
+    testCase.verifyEqual(abs_test.transit_cerf{1}{2}{2},1:6);
+    testCase.verifyEqual(abs_test.transit_cerf{1}{2}{1},[]);
+    
     % special case: flow are parallel to some common faces
     dyn = @(x,u) [1;0];
-    abs_test = Abstraction(X, U, G2, spec, label, dyn, @(x,u) 20, 0.1);
+    abs_test = Abstraction(X, U, G2, spec, label, dyn, @(x,u,r) 20, 0.1);
     abs_test.verifyTransition(0.001);
     A_ref = [0     1     1     0     0     0    1
              1     0     0     1     0     0    1
@@ -163,7 +169,7 @@ function testPlot(testCase)
     B = [1;1];
     dyn1 = @(x,u) A*x + B*u;
 
-    K1 = @(x,u) norm(A,'inf');
+    K1 = @(x,u,r) norm(A,'inf');
     
     % state space [-1,1]x[-1,1], the initial partition has four grids
     X = [-1 1; -1 1];
@@ -195,7 +201,7 @@ function testSynthesis(testCase)
     B = [1;1];
     dyn1 = @(x,u) A*x + B*u;
 
-    K1 = @(x,u) norm(A,'inf');
+    K1 = @(x,u,r) norm(A,'inf');
     
     % state space [-1,1]x[-1,1], the initial partition has four grids
     X = [-1 1; -1 1];
@@ -237,7 +243,7 @@ function testRefine(testCase)
     B = [1;1];
     dyn1 = @(x,u) A*x + B*u;
 
-    K1 = @(x,u) norm(A,'inf');
+    K1 = @(x,u,r) norm(A,'inf');
     
     % state space [-1,1]x[-1,1], the initial partition has four grids
     X = [-1 1; -1 1];
@@ -272,6 +278,7 @@ function testRefine(testCase)
     G7 = [-0.5 0; -0.5 0];
     testCase.verifyEqual(abs_test.G{1}, G1);
     testCase.verifyEqual(abs_test.G{7}, G7);
+    testCase.verifyEqual(abs_test.spec.A,[1,2,3,4,5,6,7]);
     A_ref = [  0   0   0   0   1   1   1   0
                0   1   1   0   0   1   1   0
                0   1   1   1   0   0   0   0

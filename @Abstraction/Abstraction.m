@@ -19,6 +19,10 @@ classdef Abstraction < handle
         CWin; % candidate winning set
         cont; % controller
         ts_enabled; % if ts is computed
+        transit_cerf; % the trasit direction for each grid
+                      % format: {action}{direction}{+,-}{s1,s2,s3...}
+        is_conservative; % whether re-verify transit state (incomplete)
+        specical_action_group; % save the multi-action progress group
     end
     
     methods
@@ -41,6 +45,15 @@ classdef Abstraction < handle
             obj.Win = [];
             obj.mini_width = mini_width;
             obj.ts_enabled = false;
+            obj.transit_cerf = cell(obj.m,1);
+            for i = 1:obj.m
+                obj.transit_cerf{i} = cell(obj.dim,1);
+                for j = 1:obj.dim
+                    obj.transit_cerf{i}{j} = {[],[]};
+                end
+            end
+            obj.is_conservative = true;
+            obj.specical_action_group = {};
         end
         
         % verify the transitions in A
@@ -108,16 +121,27 @@ classdef Abstraction < handle
                             end
                         end
                         
-                        if obj.A{idx_u}(G1,G1) == 1 && ...
-                                obj.is_transit(G1,idx_u)
-                            obj.A{idx_u}(G1,G1) = 0;
+                        if obj.A{idx_u}(G1,G1) == 1 
+                            [bool, flag_transit] = ...
+                                obj.is_transit(G1,idx_u);
+                            if bool
+                                obj.A{idx_u}(G1,G1) = 0;
+                                % add G1 to transit_certificate
+                                idx_transit = find(flag_transit~=0);
+                                for t = 1:length(idx_transit)
+                                    idx = idx_transit(t);
+                                    direction = 1+(flag_transit(idx)+1)/2;
+                                    obj.transit_cerf{idx_u}...
+                                        {idx}{direction}(end+1) = G1;
+                                end
+                            end
                         end
                     end
                 end
             end
         end
         % verify the self loop of a state
-        function bool = is_transit(obj,G1,idx_u,mini_width)
+        function [bool,flag_transit] = is_transit(obj,G1,idx_u,mini_width)
             if nargin <=3
                 mini_width = obj.mini_width;
             end
@@ -126,7 +150,7 @@ classdef Abstraction < handle
             u = obj.U(idx_u);
             x = mean(PG1,2);
             flag_transit = sign(obj.dyn(x,u));
-            [~, cover] = obj.compute_cover(x,u,flag_transit,1);
+            [~, cover] = obj.compute_cover(x,u,flag_transit,1, PG1);
             residual = obj.surface_diff(PG1,cover);
             
             queue = residual;
@@ -139,7 +163,7 @@ classdef Abstraction < handle
                 queue(1) = [];
                 % compute the cover and decide flow direction
                 x = mean(grid,2);
-                [flow, cover] = obj.compute_cover(x,u,flag_transit,1);
+                [flow, cover] = obj.compute_cover(x,u,flag_transit,1,grid);
                 
                 % if the grid is too small or cover is too small, stop
                 if max(grid(:,2)-grid(:,1)) <= mini_width...
@@ -266,7 +290,7 @@ classdef Abstraction < handle
                 queue(1) = [];
                 % compute the cover and decide flow direction
                 x = mean(surface,2);
-                [flow, cover] = obj.compute_cover(x,u,normal);
+                [flow, cover] = obj.compute_cover(x,u,normal,0,surface);
                 norm_flow = flow.*normal;
                 norm_flow = norm_flow(normal~=0);
                
@@ -326,18 +350,20 @@ classdef Abstraction < handle
         end
         
         % compute the radius of the cover
-        function [flow, cover] = compute_cover(obj,x,u,normal, mode)
+        function [flow, cover] = compute_cover(obj,x,u,normal, mode, range)
         % inputs: x --- state you want to query
         %         u --- action applied
         %         normal --- normal vector of the common surface
         %         mode --- = 0 find cover for surface
         %                  = 1 find cover for grid
-            if nargin <= 4
+        %         range --- the range you want to compute Lipschitz
+        %                   contant
+            if nargin <= 4 || isempty(mode)
                 mode = 0;
             end
             flow = obj.dyn(x,u);
             if mode == 0
-                r = min(abs(flow(normal~=0)))/obj.K(x,u);
+                r = min(abs(flow(normal~=0)))/obj.K(x,u,range);
             elseif mode == 1
                 normal(flow == 0) = 0;
                 if all(normal==0)
@@ -346,71 +372,15 @@ classdef Abstraction < handle
                     % here we make the r a little bit smaller such that the
                     % flow has strictly positive component by dividing
                     % (1+1e-6).
-                    r = min(abs(flow(normal~=0)))/obj.K(x,u)/(1+1e-6);
+                    r = min(abs(flow(normal~=0)))/obj.K(x,u,range)/(1+1e-6);
                 end
+            end
+            if isnan(r)
+                keyboard();
             end
             cover = [x-ones(obj.dim,1)*r,x+ones(obj.dim,1)*r];
         end
         
-        % compute residuals after one iteration  
-        function residual = surface_diff(obj,surface, cover)
-        % compute the difference (surface - cover) and represent the 
-        % residual using rectangles
-            list_interval = cell(obj.dim,1);
-            
-            % the idx of cover in the new partition, needs to be removed
-            idx_cover = cell(obj.dim,1);
-            % dim of list_interval
-            list_dim = zeros(obj.dim,1);
-            
-            for i = 1:obj.dim
-                surf_i = surface(i,:);
-                cover_i = cover(i,:);
-                
-                if cover_i(1)>surf_i(1) && cover_i(2)<surf_i(2)
-                    % ---xxx---
-                    int1 = [surf_i(1),cover_i(1)];
-                    int2 = [cover_i(1),cover_i(2)];
-                    int3 = [cover_i(2),surf_i(2)];
-                    list_interval{i} = {int1,int2,int3};
-                    idx_cover{i} = 2;
-                elseif surf_i(1)>=cover_i(1) && ...
-                        surf_i(2)<=cover_i(2)
-                    list_interval{i} = {surf_i};
-                    idx_cover{i} = 1;
-                elseif surf_i(1)>=cover_i(1) && ...
-                        surf_i(1)<cover_i(2)
-                    % xxx---- 
-                    int1 = [surf_i(1),cover_i(2)];
-                    int2 = [cover_i(2),surf_i(2)];
-                    list_interval{i} = {int1,int2};
-                    idx_cover{i} = 1;
-                elseif surf_i(2)>cover_i(1) && ...
-                        surf_i(2)<=cover_i(2)
-                    % ----xxx
-                    int1 = [surf_i(1),cover_i(1)];
-                    int2 = [cover_i(1),surf_i(2)];
-                    list_interval{i} = {int1,int2};
-                    idx_cover{i} = 2;
-                else
-                    error("surface and cover does not intersect!");
-                end
-                list_dim(i) = length(list_interval{i});
-            end
-            
-            total = prod(list_dim);
-            residual = cell(total-1,1);
-            for i = 1:total
-                sub = ind2sub2(list_dim,i);
-                surf = zeros(obj.dim,2);
-                for j = 1:obj.dim
-                    surf(j,:) = list_interval{j}{sub(j)};
-                end
-                residual{i} = surf;
-            end
-            idx_cover = sub2ind2(list_dim,idx_cover);
-            residual(idx_cover) = [];
-        end
         % check if the two grids have common surface
         function [bool, cmn_dim, cmn_surface] = has_cmn_surface(obj, G1, G2)
         % output: bool --- true: has common surface
@@ -458,7 +428,10 @@ classdef Abstraction < handle
         % plot phase portrait
         function phase_portrait(obj,fig, dense)
         % input: fig --- a figure handle, created by `fig = figure();`
-            if nargin == 2
+            if nargin <= 1
+                fig = figure;
+            end
+            if nargin <= 2
                 dense = 20;
             end
             if obj.dim == 2
@@ -489,7 +462,15 @@ classdef Abstraction < handle
         end
         
         % convert the abstraction to TransSyst format
-        function obj = to_TransSyst(obj)
+        function obj = to_TransSyst(obj, magp_enabled, mapg_pairs)
+        % mapg_pairs --- {dim,direct,{u_list}}
+            if nargin == 1
+                magp_enabled = false;
+                mapg_pairs = [];
+            end
+            if magp_enabled == true && isempty(mapg_pairs)
+                mapg_pairs = ones(obj.dim,2);
+            end
             n_s = obj.n+1;
             n_a = obj.m;
             
@@ -509,6 +490,69 @@ classdef Abstraction < handle
             end
             obj.ts = TransSyst(n_s, n_a);
             obj.ts.add_transition(s1,s2,a);
+            
+            % add special multi-action progess group
+            if magp_enabled
+%                 obj.specical_action_group = {};
+%                 for i = 1:obj.dim
+%                     for j = 1:2
+%                         if magp_direction(i,j)
+%                             mapg_x = [];
+%                             xu_mapping = zeros(obj.n,obj.m,'logical');
+%                             for idx_u = 1:obj.m
+%                                 tmp_x = obj.transit_cerf{idx_u}{i}{j};
+%                                 if ~isempty(tmp_x)
+%                                     mapg_x = union(mapg_x,tmp_x);
+%                                     xu_mapping(tmp_x,idx_u) = 1;
+%                                 end
+%                             end
+%                             mapg_x = unique(mapg_x);
+%                             xu_mapping = xu_mapping(mapg_x,:);
+%                             % lookup table x---> available u
+%                             xu_list = cell(1,length(mapg_x));
+%                             for idx_x = 1:length(mapg_x)
+%                                 xu_list{idx_x} = ...
+%                                     find(xu_mapping(idx_x,:)==1);
+%                             end
+%                             SUB = ndgrid2(xu_list);
+%                             mapg_u = [];
+%                             new_u_mapping = zeros(obj.n,1);
+%                             for k = 1:length(SUB{1})
+%                                 obj.ts.add_action();
+%                                 new_u = obj.ts.n_a;
+%                                 mapg_u = [mapg_u;new_u];
+%                                 % add transition for new input
+%                                 for l = 1:length(mapg_x)
+%                                     x = mapg_x(l);
+%                                     u = SUB{l}(k);
+%                                     new_u_mapping(x) = u;
+%                                     s2 = find(obj.A{u}(x,:));
+%                                     a = s2*0 + new_u;
+%                                     s1 = s2*0 + x;
+%                                     obj.ts.add_transition(s1,s2,a);
+%                                 end
+%                                 obj.specical_action_group{end+1}=new_u_mapping;
+%                             end
+%                             obj.ts.add_progress_group(mapg_u,mapg_x);
+%                         end
+%                     end
+%                 end
+                % simpler implementation
+                for i = 1:length(mapg_pairs)
+                    d = mapg_pairs{i}{1};
+                    dir = mapg_pairs{i}{2};
+                    u_list = mapg_pairs{i}{3};
+                    mapg_x = ones(obj.n,1,'logical');
+                    for j = 1:length(u_list)
+                        u = u_list(j);
+                        tmp_x = zeros(obj.n,1,'logical');
+                        tmp_x(obj.transit_cerf{u}{d}{dir})=1;
+                        mapg_x =  mapg_x & tmp_x;
+                    end
+                    obj.ts.add_progress_group(u_list,find(mapg_x));
+                end
+            end
+            
             obj.ts.trans_array_enable();
             obj.ts_enabled = true;
         end
@@ -578,7 +622,7 @@ classdef Abstraction < handle
             obj.ts_enabled = false;
             new_grids = obj.grid_refine_naive(G1);
             num_new = length(new_grids);
-            new_idx = [G1,obj.n+1:obj.n+3];
+            new_idx = [G1,obj.n+1:obj.n+num_new-1];
             % update partition
             obj.G{G1} = new_grids{1};
             obj.G(end+1:end+num_new-1)=new_grids(2:end);
@@ -591,6 +635,45 @@ classdef Abstraction < handle
             
             % verify new A
             obj.verifyTransition([],new_idx);
+            
+            % update transit_cerf
+            for i = 1:obj.m
+                for j = 1:obj.dim
+                    for k = 1:2
+                        if obj.is_conservative
+                            if ismember(G1,obj.transit_cerf{i}{j}{k})
+                                obj.transit_cerf{i}{j}{k}...
+                                    (end+1:end+num_new-1) = new_idx(2:end);
+                            end
+                        else
+                            if ismember(G1,obj.transit_cerf{i}{j}{k})
+                                obj.transit_cerf{i}{j}{k} = setdiff(...
+                                    obj.transit_cerf{i}{j}{k},G1);
+                            end
+                        end
+                    end
+                end
+            end
+                    
+            
+            % update spec
+            try
+                if ismember(G1,obj.spec.A)
+                    obj.spec.A(end+1:end+num_new-1) = new_idx(2:end);
+                end
+                if ismember(G1,obj.spec.B)
+                    obj.spec.B(end+1:end+num_new-1) = new_idx(2:end);
+                end
+                
+                for i = 1:length(obj.spec.C)
+                    if ismember(G1,obj.spec.C{i})
+                        obj.spec.C{i}(end+1:end+num_new-1) = new_idx(2:end);
+                    end
+                end
+            catch
+                disp("No spec yet.");
+            end
+            
         end
         
         % naive refinement strategy
@@ -625,6 +708,41 @@ classdef Abstraction < handle
             bool = false;
             if any(PG(:,1)==obj.X(:,1)) || any(PG(:,2)==obj.X(:,2))
                 bool = true;
+            end
+        end
+        
+        % plot the partition of the abstraction
+        function plot(obj,fig,list_grid,color)
+        % input: fig --- figure handle
+        %        list_grid --- you can specify some grids to plot
+            if nargin <= 1
+                figure;
+            else
+                figure(fig);
+            end
+            hold on;
+            if nargin <= 2 || isempty(list_grid)
+                list_grid = 1:obj.n;
+            end
+            if nargin <= 3
+                color = rand(1,3);
+            end
+
+            
+            for i = 1:length(list_grid)
+                idx = list_grid(i);
+                if idx == 0
+                    grid = obj.X;
+                else
+                    grid = obj.G{idx};
+                end
+                v = [grid(1,1) grid(2,1);
+                     grid(1,1) grid(2,2);
+                     grid(1,2) grid(2,2);
+                     grid(1,2) grid(2,1)];
+                f = [1 2 3 4];
+                patch('Faces',f,'Vertices',v,...
+                'EdgeColor',color,'FaceColor','none','LineWidth',2);
             end
         end
     end
@@ -688,12 +806,79 @@ classdef Abstraction < handle
                 obj.A{i} = obj.A{i} | A_pad;
                 % self loop of new states: if original grid has no self
                 % loop, then the new states have no self loop
-                if A_i(new_idx(1),new_idx(1))==0
-                    for j = 1:length(new_idx)
-                        obj.A{i}(new_idx(j),new_idx(j)) = 0;
+                if A_i(new_idx(1),new_idx(1))==0 
+                    if obj.is_conservative
+                        for j = 1:length(new_idx)
+                            obj.A{i}(new_idx(j),new_idx(j)) = 0;
+                        end
+                    else
+                        obj.A{i}(new_idx(1),new_idx(1))=1;
                     end
                 end
             end
         end
+    end
+    
+    methods(Static)
+        % compute residuals after one iteration  
+        function residual = surface_diff(surface, cover)
+        % compute the difference (surface - cover) and represent the 
+        % residual using rectangles
+            dim = size(surface,1);
+            list_interval = cell(dim,1);
+            
+            % the idx of cover in the new partition, needs to be removed
+            idx_cover = cell(dim,1);
+            % dim of list_interval
+            list_dim = zeros(dim,1);
+            
+            for i = 1:dim
+                surf_i = surface(i,:);
+                cover_i = cover(i,:);
+                
+                if cover_i(1)>surf_i(1) && cover_i(2)<surf_i(2)
+                    % ---xxx---
+                    int1 = [surf_i(1),cover_i(1)];
+                    int2 = [cover_i(1),cover_i(2)];
+                    int3 = [cover_i(2),surf_i(2)];
+                    list_interval{i} = {int1,int2,int3};
+                    idx_cover{i} = 2;
+                elseif surf_i(1)>=cover_i(1) && ...
+                        surf_i(2)<=cover_i(2)
+                    list_interval{i} = {surf_i};
+                    idx_cover{i} = 1;
+                elseif surf_i(1)>=cover_i(1) && ...
+                        surf_i(1)<cover_i(2)
+                    % xxx---- 
+                    int1 = [surf_i(1),cover_i(2)];
+                    int2 = [cover_i(2),surf_i(2)];
+                    list_interval{i} = {int1,int2};
+                    idx_cover{i} = 1;
+                elseif surf_i(2)>cover_i(1) && ...
+                        surf_i(2)<=cover_i(2)
+                    % ----xxx
+                    int1 = [surf_i(1),cover_i(1)];
+                    int2 = [cover_i(1),surf_i(2)];
+                    list_interval{i} = {int1,int2};
+                    idx_cover{i} = 2;
+                else
+                    error("surface and cover does not intersect!");
+                end
+                list_dim(i) = length(list_interval{i});
+            end
+            
+            total = prod(list_dim);
+            residual = cell(total-1,1);
+            for i = 1:total
+                sub = ind2sub2(list_dim,i);
+                surf = zeros(dim,2);
+                for j = 1:dim
+                    surf(j,:) = list_interval{j}{sub(j)};
+                end
+                residual{i} = surf;
+            end
+            idx_cover = sub2ind2(list_dim,idx_cover);
+            residual(idx_cover) = [];
+        end 
     end
 end
